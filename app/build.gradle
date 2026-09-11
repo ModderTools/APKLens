@@ -3,40 +3,93 @@ plugins { id 'com.android.application' }
 // ----------------------------------------------------------------------------
 // jadx-core is not published to Google Maven / Maven Central — its binaries ship
 // as a GitHub release zip. fetchJadx downloads the official distribution and
-// extracts the engine jar(s) into app/build/jadx-libs.
+// extracts the merged engine jar (jadx-x.y.z-all.jar).
 //
-// IMPORTANT: the classpath must use fileTree(dir:..., include:['*.jar']),
-// NOT files(dir). A bare directory on the Java classpath is treated as a
-// package ROOT — jars inside it are invisible to javac. That exact mistake
-// caused "package jadx.api does not exist".
+// The merged jar bundles jadx-gui's DESKTOP dependencies (FlatLaf, JSVG, ...).
+// Those classes contain MethodHandle.invoke/invokeExact call sites, which D8
+// can only dex for min-api >= 26 (DEX invoke-polymorphic opcode exists only on
+// Android 8+). Hence minSdk 26 below. We additionally strip the packages that
+// are provably GUI-only (jadx-core is headless and cannot reference them) to
+// reclaim APK space — with a safe fallback to the full jar on any failure.
+//
+// The classpath uses fileTree(dir, '*.jar') — a bare directory would be treated
+// as a package root and its jars would be invisible to javac.
 // ----------------------------------------------------------------------------
 def jadxVersion = '1.5.0'
 def jadxLibsDir = layout.buildDirectory.dir('jadx-libs').get().asFile
 
-// True when the directory holds at least one jar that really contains the engine.
-def jadxEngineReady = {
-    def jars = jadxLibsDir.listFiles()?.findAll { it.name.endsWith('.jar') } ?: []
-    return jars.any { jar ->
-        try {
-            new java.util.zip.ZipFile(jar).withCloseable { zf ->
-                zf.getEntry('jadx/api/JadxDecompiler.class') != null
-            }
-        } catch (Exception ignored) {
-            false
+def jarHasEngine = { File f ->
+    try {
+        new java.util.zip.ZipFile(f).withCloseable { zf ->
+            zf.getEntry('jadx/api/JadxDecompiler.class') != null
         }
+    } catch (Exception ignored) { false }
+}
+
+def jadxEngineReady = {
+    (jadxLibsDir.listFiles()?.findAll { it.name.endsWith('.jar') } ?: []).any { jarHasEngine(it) }
+}
+
+// Removes desktop-only packages from a *-all.jar, producing *-android.jar.
+// Idempotent; falls back to keeping the full jar if rewriting fails.
+def stripDesktopPackages = { File jar ->
+    def stripped = new File(jadxLibsDir, jar.name.replace('-all.jar', '-android.jar'))
+    if (stripped.exists() && !jarHasEngine(stripped)) {
+        logger.lifecycle("Removing incomplete ${stripped.name}")
+        stripped.delete()
+    }
+    if (!stripped.exists()) {
+        logger.lifecycle("Stripping desktop-only classes from ${jar.name} …")
+        def tmp = new File(jadxLibsDir, stripped.name + '.tmp')
+        try {
+            new java.util.zip.ZipFile(jar).withCloseable { src ->
+                new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(tmp)).withCloseable { out ->
+                    src.entries().each { e ->
+                        if (e.isDirectory()) return
+                        String n = e.getName()
+                        boolean drop = n.startsWith('com/formdev/')      // FlatLaf (Swing L&F, gui-only)
+                                || n.startsWith('com/github/weisj/')     // JSVG (gui icons)
+                                || n.startsWith('com/apple/')            // Apple desktop stubs
+                                || n.startsWith('META-INF/versions/')    // multi-release overrides
+                                || n == 'module-info.class'
+                        if (drop) return
+                        out.putNextEntry(new java.util.zip.ZipEntry(n))
+                        src.getInputStream(e).withCloseable { ins -> out << ins }
+                        out.closeEntry()
+                    }
+                }
+            }
+            if (!jarHasEngine(tmp)) throw new IllegalStateException("engine class missing after strip")
+            java.nio.file.Files.move(tmp.toPath(), stripped.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            logger.lifecycle("Stripped jar written: ${stripped.name}")
+        } catch (Exception ex) {
+            logger.warn("jadx jar stripping failed (" + ex.message + "); keeping the full jar " +
+                    "(minSdk 26 dexes it anyway).")
+            tmp.delete()
+            return
+        }
+    }
+    if (stripped.exists() && jarHasEngine(stripped)) {
+        jar.delete()
     }
 }
 
 tasks.register('fetchJadx') {
-    description = 'Downloads the official jadx distribution and verifies the engine jar.'
+    description = 'Downloads the official jadx distribution, strips desktop-only packages, verifies the engine jar.'
     doLast {
+        jadxLibsDir.mkdirs()
+
+        // Normalize any previously extracted fat jar (idempotent, no re-download needed).
+        jadxLibsDir.listFiles()?.findAll { it.name.endsWith('-all.jar') }?.each { stripDesktopPackages(it) }
+
         if (jadxEngineReady()) {
             logger.lifecycle('jadx engine jar present and verified — skipping download.')
             return
         }
-        jadxLibsDir.mkdirs()
-        jadxLibsDir.listFiles()?.each { it.delete() }   // clear stale/invalid extractions
 
+        // Fresh download.
+        jadxLibsDir.listFiles()?.each { it.delete() }
         def zipFile = new File(jadxLibsDir, "jadx-${jadxVersion}.zip")
         def url = "https://github.com/skylot/jadx/releases/download/v${jadxVersion}/jadx-${jadxVersion}.zip"
         logger.lifecycle("Downloading jadx engine: ${url}")
@@ -54,7 +107,7 @@ tasks.register('fetchJadx') {
                 String name = entry.getName()
                 String base = name.substring(name.lastIndexOf('/') + 1)
                 if (!base.endsWith('.jar')) return
-                if (base.contains('jadx-gui')) return   // desktop Swing GUI — unusable on Android
+                if (base.contains('jadx-gui')) return   // (kept for future multi-jar distributions)
                 new File(jadxLibsDir, base).withOutputStream { outs ->
                     zf.getInputStream(entry).withCloseable { ins -> outs << ins }
                 }
@@ -63,16 +116,16 @@ tasks.register('fetchJadx') {
         }
         zipFile.delete()
 
+        // Strip desktop packages from the freshly extracted fat jar.
+        jadxLibsDir.listFiles()?.findAll { it.name.endsWith('-all.jar') }?.each { stripDesktopPackages(it) }
+
         if (!jadxEngineReady()) {
             throw new GradleException("Extracted ${count} jar(s) from the jadx distribution, but none " +
                     "contains jadx/api/JadxDecompiler — unexpected distribution layout. Please report this.")
         }
-        logger.lifecycle("Extracted ${count} jadx jar(s) into ${jadxLibsDir} (engine verified).")
+        logger.lifecycle("jadx engine ready in ${jadxLibsDir} (engine verified).")
     }
 }
-
-// No outputs declaration: the jadxEngineReady() guard makes a verified no-op cheap,
-// and running every build guarantees a stale/broken extraction is never trusted.
 
 def jadxEngine = fileTree(dir: jadxLibsDir, include: ['*.jar']).builtBy('fetchJadx')
 
@@ -82,7 +135,8 @@ android {
 
     defaultConfig {
         applicationId "com.apklens.app"
-        minSdk 24
+        minSdk 26              // REQUIRED: DEX invoke-polymorphic (MethodHandle.invoke)
+                               // is only supported on Android 8.0 (API 26)+.
         targetSdk 34
         versionCode 1
         versionName "1.0.0"
