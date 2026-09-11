@@ -1,0 +1,59 @@
+package com.apklens.app.ui;
+
+import android.view.View;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+
+/**
+ * Base class for all screens. A screen is a FrameLayout built 100% in Java.
+ * The MainActivity keeps a back-stack of screens; each screen can consume back presses.
+ */
+public abstract class Screen extends FrameLayout {
+    protected final MainActivity act;
+
+    public Screen(MainActivity act) {
+        super(act);
+        this.act = act;
+        setBackgroundColor(Ui.BG);
+        addView(build(), new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+    }
+
+    protected abstract View build();
+
+    /** Called when the screen becomes the visible top of the stack. */
+    public void onShow() {}
+
+    /** Called when the screen is covered or removed. */
+    public void onHide() {}
+
+    /** Return true to consume the back press. */
+    public boolean onBack() { return false; }
+
+    /** Standard header: optional back arrow + title. Returns the header row. */
+    protected LinearLayout header(String title, boolean withBack) {
+        LinearLayout h = Ui.row(act);
+        int pad = Ui.dp(act, 16);
+        h.setPadding(pad, pad, pad, Ui.dp(act, 8));
+        if (withBack) {
+            ImageView back = new ImageView(act);
+            back.setImageResource(com.apklens.app.R.drawable.ic_back);
+            back.setBackground(new android.graphics.drawable.ColorDrawable(Color_TRANSPARENT()));
+            int bp = Ui.dp(act, 6);
+            back.setPadding(bp, bp, bp, bp);
+            back.setOnClickListener(v -> act.pop());
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    Ui.dp(act, 34), Ui.dp(act, 34));
+            lp.rightMargin = Ui.dp(act, 10);
+            h.addView(back, lp);
+        }
+        TextView_placeholder: {
+            android.widget.TextView t = Ui.text(act, title, 20, Ui.INK, true);
+            h.addView(t, Ui.lpWeight(act, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        }
+        return h;
+    }
+
+    private static int Color_TRANSPARENT() { return 0x00000000; }
+}
