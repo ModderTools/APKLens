@@ -1,0 +1,50 @@
+name: Android CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare launcher icon
+        run: |
+          # If the developer committed their own logo.png, the vector placeholder must go.
+          if [ -f app/src/main/res/drawable/logo.png ]; then
+            rm -f app/src/main/res/drawable/logo.xml
+            echo "Using logo.png as the launcher icon."
+          else
+            echo "logo.png not found — building with the vector placeholder (logo.xml)."
+          fi
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.4'
+          cache-read-only: false
+
+      - name: Build (debug + unsigned release)
+        run: gradle assembleDebug assembleRelease --stacktrace --warning-mode all
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApkLens-debug
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: Upload release APK (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApkLens-release-unsigned
+          path: app/build/outputs/apk/release/*.apk
