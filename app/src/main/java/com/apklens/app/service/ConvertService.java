@@ -21,6 +21,7 @@ import com.apklens.app.engine.EngineLog;
 import com.apklens.app.engine.EngineResult;
 import com.apklens.app.engine.Io;
 import com.apklens.app.engine.ProgressListener;
+import com.apklens.app.engine.ZipSink;                    // FIXED: needed for buildSink's return type
 import com.apklens.app.platform.MediaStoreSink;
 import com.apklens.app.platform.Store;
 import com.apklens.app.ui.MainActivity;
@@ -120,10 +121,9 @@ public class ConvertService extends Service {
                 try (EngineLog log = EngineLog.toFile(logFile)) {
                     ProgressListener prog = new ProgressListener() {
                         private long last = 0;
-                        private String lastStage = "";
                         @Override public void stage(String key, String label) {
                             EngineState.update(label, -1, null);
-                            updateFg(label, EngineState.getPercent());
+                            updateFg(EngineState.getStage(), EngineState.getPercent());
                         }
                         @Override public void detail(String line) {
                             long now = System.currentTimeMillis();
@@ -131,7 +131,7 @@ public class ConvertService extends Service {
                         }
                         @Override public void percent(int overall) {
                             long now = System.currentTimeMillis();
-                            if (now - last > 120 || !lastStage.isEmpty()) {
+                            if (now - last > 120) {
                                 last = now;
                                 EngineState.update(null, overall, null);
                                 updateFg(EngineState.getStage(), overall);
@@ -171,9 +171,11 @@ public class ConvertService extends Service {
         return Build.VERSION.SDK_INT >= 24 ? Service.STOP_FOREGROUND_REMOVE : 1;
     }
 
-    private Object buildSink(String projectName, String apkName) {
+    // FIXED: return type is ZipSink (was Object) so it can be assigned to cfg.sink.
+    private ZipSink buildSink(String projectName, String apkName) {
         String base = apkName == null ? "project" : apkName;
         if (base.toLowerCase().endsWith(".apk")) base = base.substring(0, base.length() - 4);
+        if (base.isEmpty()) base = "project";
         if (Store.directAvailable(this)) {
             File dir = new File(Store.directRoot(), projectName);
             return new DirectFileSink(new File(dir, base + ".zip"));
