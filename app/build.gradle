@@ -1,5 +1,59 @@
 plugins { id 'com.android.application' }
 
+// ----------------------------------------------------------------------------
+// jadx-core is NOT published to Google Maven / Maven Central. Its binaries ship
+// as GitHub release zips. This task vendors the official jars at build time and
+// is wired into the compile classpath via `builtBy`, so it runs automatically.
+// First build needs internet (~15 MB download); later builds reuse the output.
+// ----------------------------------------------------------------------------
+def jadxVersion = '1.5.0'
+def jadxLibsDir = layout.buildDirectory.dir('jadx-libs').get().asFile
+
+tasks.register('fetchJadx') {
+    description = 'Downloads the official jadx distribution and extracts the engine jars.'
+    outputs.dir(jadxLibsDir)
+    doLast {
+        def existing = jadxLibsDir.listFiles()?.findAll { it.name.endsWith('.jar') }
+        if (existing) {
+            logger.lifecycle("jadx jars found in ${jadxLibsDir} — skipping download.")
+            return
+        }
+        jadxLibsDir.mkdirs()
+        def zipFile = new File(jadxLibsDir, "jadx-${jadxVersion}.zip")
+        def url = "https://github.com/skylot/jadx/releases/download/v${jadxVersion}/jadx-${jadxVersion}.zip"
+        logger.lifecycle("Downloading jadx engine: ${url}")
+        try {
+            new URL(url).withInputStream { ins ->
+                zipFile.withOutputStream { outs -> outs << ins }
+            }
+        } catch (Exception e) {
+            throw new GradleException("Could not download jadx from ${url} " +
+                    "(internet required on the first build). Cause: ${e.message}")
+        }
+        int count = 0
+        new java.util.zip.ZipFile(zipFile).withCloseable { zf ->
+            zf.entries().each { entry ->
+                if (entry.isDirectory()) return
+                String name = entry.getName()
+                String base = name.substring(name.lastIndexOf('/') + 1)
+                boolean skip = !base.endsWith('.jar')
+                        || base.contains('jadx-gui')   // desktop Swing GUI — not usable on Android
+                        || base.contains('jadx-cli')   // CLI wrapper — not needed on Android
+                if (skip) return
+                new File(jadxLibsDir, base).withOutputStream { outs ->
+                    zf.getInputStream(entry).withCloseable { ins -> outs << ins }
+                }
+                count++
+            }
+        }
+        zipFile.delete()
+        if (count == 0) {
+            throw new GradleException("jadx zip downloaded but no jars were extracted — unexpected distribution layout.")
+        }
+        logger.lifecycle("Extracted ${count} jadx jars into ${jadxLibsDir}")
+    }
+}
+
 android {
     namespace 'com.apklens.app'
     compileSdk 34
@@ -15,21 +69,23 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false   // R8 off: jadx-core/dexlib2 use reflection; correctness > size here
+            minifyEnabled false   // R8 off: jadx uses reflection/ServiceLoader; correctness > size
         }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-        coreLibraryDesugaringEnabled true   // jadx uses Java 11+ APIs (List.of etc.)
+        coreLibraryDesugaringEnabled true   // jadx uses Java 11+ APIs (List.of, streams, …)
     }
 
     packaging {
         resources {
-            excludes += ['META-INF/DEPENDENCIES','META-INF/LICENSE','META-INF/LICENSE.txt',
-                         'META-INF/NOTICE','META-INF/NOTICE.txt','META-INF/INDEX.LIST',
-                         'META-INF/AL2.0','META-INF/LGPL2.1','module-info.class']
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/LICENSE.txt',
+                         'META-INF/NOTICE', 'META-INF/NOTICE.txt', 'META-INF/INDEX.LIST',
+                         'META-INF/AL2.0', 'META-INF/LGPL2.1', 'module-info.class',
+                         'META-INF/versions/**']
+            merges += ['META-INF/services/**']   // keep jadx plugin ServiceLoader registrations
         }
     }
 
@@ -40,7 +96,8 @@ android {
 }
 
 dependencies {
-    // The decompilation engine: DEX parsing, Java reconstruction, resource/manifest decoding.
-    implementation 'io.github.jadx:jadx-core:1.5.0'
+    // Vendored jadx engine jars, populated by fetchJadx before compilation.
+    implementation files(jadxLibsDir) { builtBy 'fetchJadx' }
+
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }
