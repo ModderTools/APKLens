@@ -6,7 +6,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,12 +16,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
+import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
-import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 import jadx.api.JadxArgs;
@@ -61,7 +60,6 @@ public final class Pipeline {
                 p.stage("DECODE", "Decoding DEX and resources");
                 p.percent(5);
                 File jadxOut = new File(cfg.workDir, "jadx");
-                // jadx writes decoded resources under this dir (layout resolved dynamically)
                 JadxArgs args = new JadxArgs();
                 args.setInputFiles(Collections.singletonList(cfg.apkFile));
                 args.setOutDir(jadxOut);
@@ -76,22 +74,19 @@ public final class Pipeline {
                 p.percent(12);
 
                 p.stage("RES", "Decoding resources & manifest");
-                boolean resOk = true;
                 try {
                     dx.saveResources();
                 } catch (Throwable t) {
-                    resOk = false;
                     r.warnings.add("Resource decoding failed — raw res/ and assets/ copied instead.");
                     log.line("saveResources failed", t);
                 }
-                importJadxOutput(jadxOut, cfg.outDir, r, log, zf, resOk);
+                importJadxOutput(jadxOut, cfg.outDir, r, log, zf);
                 parseManifestInfo(cfg.outDir, r);
                 p.percent(20);
 
                 // ---------------- Stage: DECOMPILE ----------------
                 boolean smaliOn = cfg.smali;
                 int decompileSpan = smaliOn ? 40 : 48;
-                int smaliSpan = smaliOn ? 8 : 0;
                 int baseDecompile = 20;
 
                 p.stage("DECOMPILE", "Reconstructing Java sources");
@@ -116,8 +111,8 @@ public final class Pipeline {
 
                 try {
                     for (Map.Entry<JavaClass, List<JavaClass>> entry : groups.entrySet()) {
-                        JavaClass top = entry.getKey();
-                        List<JavaClass> members = entry.getValue();
+                        final JavaClass top = entry.getKey();
+                        final List<JavaClass> members = entry.getValue();
                         futures.add(pool.submit(() -> {
                             if (p.isCancelled()) throw new CancelledException();
                             try {
@@ -174,8 +169,7 @@ public final class Pipeline {
                 r.errorCount = errors.get();
                 r.kotlinClasses = kotlinFiles.size();
                 log.line("decompile: wrote " + r.classCount + " classes, errors=" + r.errorCount);
-                int pctAfterDecompile = baseDecompile + decompileSpan;
-                p.percent(pctAfterDecompile);
+                p.percent(baseDecompile + decompileSpan);
 
                 // ---------------- Stage: BUILD ----------------
                 p.stage("BUILD", "Extracting native libs, META-INF and extras");
@@ -189,7 +183,6 @@ public final class Pipeline {
 
                 if (cfg.metaInf) {
                     File meta = new File(cfg.outDir, "META-INF");
-                    r.warnings.size(); // no-op keep
                     SafeZip.copyMatching(zf, (name, e) -> SafeZip.isMetaInfArtifact(name),
                             meta, 32 * Io.MB, warns, log);
                 }
@@ -219,16 +212,12 @@ public final class Pipeline {
                 long zt0 = System.currentTimeMillis();
                 ZipWriter.write(cfg.outDir, os, new ProgressListener() {
                     @Override public void stage(String k, String l) {}
-                    @Override public void detail(String line) {
-                        p.detail(line);
-                    }
-                    @Override public void percent(int ignored) {
-                        // local zip progress mapped into the final 16%
-                    }
+                    @Override public void detail(String line) { p.detail(line); }
+                    @Override public void percent(int ignored) {}
                     @Override public boolean isCancelled() { return p.isCancelled(); }
                 });
-                r.zipSize = guessSize(cfg.sink);
                 cfg.sink.commit();
+                r.zipSize = sinkSize(cfg.sink);
                 log.line("zip: committed in " + (System.currentTimeMillis() - zt0) + "ms");
                 r.zipMode = cfg.sink.mode();
                 r.zipUri = cfg.sink.uriString();
@@ -241,7 +230,6 @@ public final class Pipeline {
                     r.message = r.errorCount + " class(es) could not be fully reconstructed — "
                             + "check smali/ and analysis-report.txt.";
                 }
-                dx = null; // release engine memory before we leave
             }
         } catch (CancelledException c) {
             r.status = "CANCELLED";
@@ -286,7 +274,7 @@ public final class Pipeline {
     }
 
     private static void importJadxOutput(File jadxOut, File out, EngineResult r,
-                                         EngineLog log, ZipFile zf, boolean resOk) throws IOException {
+                                         EngineLog log, ZipFile zf) throws IOException {
         // Manifest
         File manifest = firstFile(new File(jadxOut, "AndroidManifest.xml"),
                 new File(jadxOut, "resources/AndroidManifest.xml"));
@@ -353,7 +341,11 @@ public final class Pipeline {
         try {
             DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
             f.setNamespaceAware(true);
-            Document d = f.parse(mf);
+            // The decoded manifest derives from an untrusted APK — refuse DTDs/external entities.
+            try { f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true); }
+            catch (Throwable ignored) {}
+            DocumentBuilder db = f.newDocumentBuilder(); // FIXED: parse() lives on the builder
+            Document d = db.parse(mf);
             Element root = d.getDocumentElement();
             r.apkPackage = root.getAttribute("package");
             String ns = "http://schemas.android.com/apk/res/android";
@@ -411,7 +403,7 @@ public final class Pipeline {
 
             if (!errorSamples.isEmpty()) {
                 sb.append("Classes with reconstruction errors (first ")
-                  .append(errorSamples.size()).append("):\n");
+                        .append(errorSamples.size()).append("):\n");
                 sb.append("--------------------------------\n");
                 for (String[] e : errorSamples) {
                     sb.append("  ").append(e[0]).append(" — ").append(e[1]).append('\n');
@@ -439,21 +431,19 @@ public final class Pipeline {
 
             Io.writeString(new File(cfg.outDir, "README.txt"),
                     "This is a RECONSTRUCTED project generated by ApkLens from a compiled APK.\n"
-                    + "It is intended for reading and study, NOT for building:\n"
-                    + "decompiled code frequently does not recompile and is not the original source.\n\n"
-                    + "See analysis-report.txt for statistics, Kotlin-origin class detection,\n"
-                    + "warnings and the list of classes that failed to reconstruct.\n");
+                            + "It is intended for reading and study, NOT for building:\n"
+                            + "decompiled code frequently does not recompile and is not the original source.\n\n"
+                            + "See analysis-report.txt for statistics, Kotlin-origin class detection,\n"
+                            + "warnings and the list of classes that failed to reconstruct.\n");
         } catch (IOException ignored) {}
     }
 
-    private static long guessSize(ZipSink sink) {
+    /** ZIP size after commit (direct mode only; MediaStore size is not engine-visible). */
+    private static long sinkSize(ZipSink sink) {
         try {
-            if (sink instanceof DirectFileSink) {
-                String p = sink.filePath();
-                if (p != null) {
-                    File f = new File(p);
-                    if (f.isFile()) return f.length();
-                }
+            if ("direct".equals(sink.mode()) && sink.filePath() != null) {
+                File f = new File(sink.filePath());
+                if (f.isFile()) return f.length();
             }
         } catch (Throwable ignored) {}
         return 0;
