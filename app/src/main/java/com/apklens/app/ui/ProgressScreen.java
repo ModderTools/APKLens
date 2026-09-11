@@ -72,7 +72,8 @@ public class ProgressScreen extends Screen {
         return root;
     }
 
-    private final EngineState.Listener listener = EngineState.this_changed -> refresh();
+    // FIXED: Listener is a no-arg functional interface — plain lambda, no parameter name.
+    private final EngineState.Listener listener = () -> refresh();
 
     @Override
     public void onShow() {
