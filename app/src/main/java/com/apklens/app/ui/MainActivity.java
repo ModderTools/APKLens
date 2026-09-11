@@ -8,8 +8,6 @@ import android.view.View;
 import android.view.animation.AlphaAnimation;
 import android.widget.FrameLayout;
 
-import androidx.core.content.ContextCompat; // NOT USED — kept zero-dependency; see note below.
-
 import com.apklens.app.service.EngineState;
 
 import java.util.ArrayDeque;
@@ -17,9 +15,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Single-activity host. Screens are programmatic FrameLayouts pushed on a stack.
- * NOTE: no AndroidX is used anywhere in this app; the import above is intentionally
- * absent in the final source (kept out of dependencies entirely).
+ * Single-activity host. Screens are programmatic FrameLayouts stacked in `root`.
+ * Zero AndroidX — everything uses platform APIs only.
  */
 public class MainActivity extends android.app.Activity {
 
@@ -66,6 +63,8 @@ public class MainActivity extends android.app.Activity {
     public void push(Screen s, boolean animate) {
         if (!stack.isEmpty()) stack.peek().onHide();
         stack.push(s);
+        // Previous screen stays attached underneath (FrameLayout stacking) —
+        // pop() therefore only REMOVES the top; it must never re-add.
         root.addView(s, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         if (animate) {
@@ -81,9 +80,8 @@ public class MainActivity extends android.app.Activity {
         Screen cur = stack.pop();
         cur.onHide();
         root.removeView(cur);
+        // The previous screen is still attached underneath — just animate it back in.
         Screen prev = stack.peek();
-        root.addView(prev, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         AlphaAnimation a = new AlphaAnimation(0.55f, 1f);
         a.setDuration(150);
         prev.startAnimation(a);
@@ -104,7 +102,7 @@ public class MainActivity extends android.app.Activity {
     }
 
     public void awaitPermission(int req, String perm, PermCallback cb) {
-        if (ContextCompat_noop(perm)) {
+        if (hasPermission(perm)) {
             cb.onResult(true);
             return;
         }
@@ -112,8 +110,7 @@ public class MainActivity extends android.app.Activity {
         requestPermissions(new String[]{perm}, req);
     }
 
-    /** Minimal local permission check (avoids AndroidX). */
-    private boolean ContextCompat_noop(String perm) {
+    private boolean hasPermission(String perm) {
         return checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED;
     }
 
@@ -148,8 +145,7 @@ public class MainActivity extends android.app.Activity {
     /** Fire-and-forget notification permission (API 33+). Never blocks the workflow. */
     public void ensureNotifPermission() {
         if (android.os.Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
+                && !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
         }
     }
