@@ -39,19 +39,19 @@ public class SettingsScreen extends Screen {
         // ---------- Engine ----------
         root.addView(sectionLabel("DECOMPILATION ENGINE", pad));
         LinearLayout card = Ui.card(act);
-        addCard(card, pad);
+        card.setPadding(pad, pad, pad, pad);
         root.addView(card, cardParams(pad));
 
         card.addView(switchRow(p, "fallback", "Fallback mode",
-                "Produce raw, low-level output for APKs that resist normal decompilation.", pad));
+                "Produce raw, low-level output for APKs that resist normal decompilation."));
         card.addView(switchRow(p, "inconsistent", "Try harder (inconsistent code)",
-                "Emit code even when the decompiler could not verify it completely.", pad));
+                "Emit code even when the decompiler could not verify it completely."));
         card.addView(switchRow(p, "smali", "Generate Smali files",
-                "Adds a smali/ tree — the exact, always-readable representation of the bytecode.", pad));
+                "Adds a smali/ tree — the exact, always-readable representation of the bytecode."));
         card.addView(switchRow(p, "rawDex", "Include raw DEX files",
-                "Copies classes.dex / classes2.dex … into the ZIP (increases ZIP size).", pad));
+                "Copies classes.dex / classes2.dex … into the ZIP (increases ZIP size)."));
         card.addView(switchRow(p, "metaInf", "Include META-INF signatures",
-                "Keeps signing manifests and certificate blocks in the output.", pad));
+                "Keeps signing manifests and certificate blocks in the output."));
 
         threadsLabel = Ui.text(act, "Decompile threads: " + p.threads(), 14.5f, Ui.INK, true);
         threadsLabel.setPadding(0, Ui.dp(act, 14), 0, Ui.dp(act, 6));
@@ -78,7 +78,7 @@ public class SettingsScreen extends Screen {
         // ---------- Storage ----------
         root.addView(sectionLabel("STORAGE", pad));
         storageCard = Ui.card(act);
-        addCard(storageCard, pad);
+        storageCard.setPadding(pad, pad, pad, pad);
         root.addView(storageCard, cardParams(pad));
 
         storageStatus = Ui.text(act, "", 13.5f, Ui.INK, false);
@@ -95,7 +95,8 @@ public class SettingsScreen extends Screen {
         android.widget.Button openDl = Ui.outline(act, "Open Downloads", Ui.ACCENT, Ui.INK);
         openDl.setOnClickListener(v -> {
             try {
-                startActivity(new Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
+                // FIXED: Views are not Contexts — must start the activity via `act`.
+                act.startActivity(new Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             } catch (Exception e) {
                 Toast.makeText(act, "No Downloads app found", Toast.LENGTH_SHORT).show();
@@ -109,7 +110,7 @@ public class SettingsScreen extends Screen {
         // ---------- Maintenance ----------
         root.addView(sectionLabel("MAINTENANCE", pad));
         LinearLayout mCard = Ui.card(act);
-        addCard(mCard, pad);
+        mCard.setPadding(pad, pad, pad, pad);
         root.addView(mCard, cardParams(pad));
         android.widget.Button clear = Ui.outline(act, "Clear cached working files", Ui.BAD, Ui.BAD);
         clear.setOnClickListener(v -> {
@@ -140,16 +141,12 @@ public class SettingsScreen extends Screen {
         return lp;
     }
 
-    private void addCard(LinearLayout card, int pad) {
-        card.setPadding(pad, pad, pad, pad);
-    }
-
-    private View switchRow(Prefs p, String key, String title, String desc, int pad) {
+    private View switchRow(Prefs p, String key, String title, String desc) {
         LinearLayout row = new LinearLayout(act);
         row.setOrientation(LinearLayout.VERTICAL);
         Switch sw = Ui.tintedSwitch(act);
         sw.setText(title);
-        sw.setChecked(p.get(key, "fallback".equals(key) || "rawDex".equals(key) ? false : true));
+        sw.setChecked(p.get(key, "inconsistent".equals(key) || "smali".equals(key) || "metaInf".equals(key)));
         sw.setOnCheckedChangeListener((b, on) -> p.set(key, on));
         row.addView(sw);
         TextView d = Ui.text(act, desc, 11.5f, Ui.MUTED, false);
@@ -183,7 +180,6 @@ public class SettingsScreen extends Screen {
     public void onShow() { refreshCard(); }
 
     private void refreshCard() {
-        String txt = Store.describeMode(act);
-        storageStatus.setText(txt);
+        storageStatus.setText(Store.describeMode(act));
     }
 }
