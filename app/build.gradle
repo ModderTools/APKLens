@@ -1,45 +1,60 @@
 plugins { id 'com.android.application' }
 
 // ----------------------------------------------------------------------------
-// jadx-core is NOT published to Google Maven / Maven Central. Its binaries ship
-// as GitHub release zips. This task vendors the official jars at build time and
-// is wired into the compile classpath via `builtBy`, so it runs automatically.
-// First build needs internet (~15 MB download); later builds reuse the output.
+// jadx-core is not published to Google Maven / Maven Central — its binaries ship
+// as a GitHub release zip. fetchJadx downloads the official distribution and
+// extracts the engine jar(s) into app/build/jadx-libs.
+//
+// IMPORTANT: the classpath must use fileTree(dir:..., include:['*.jar']),
+// NOT files(dir). A bare directory on the Java classpath is treated as a
+// package ROOT — jars inside it are invisible to javac. That exact mistake
+// caused "package jadx.api does not exist".
 // ----------------------------------------------------------------------------
 def jadxVersion = '1.5.0'
 def jadxLibsDir = layout.buildDirectory.dir('jadx-libs').get().asFile
 
+// True when the directory holds at least one jar that really contains the engine.
+def jadxEngineReady = {
+    def jars = jadxLibsDir.listFiles()?.findAll { it.name.endsWith('.jar') } ?: []
+    return jars.any { jar ->
+        try {
+            new java.util.zip.ZipFile(jar).withCloseable { zf ->
+                zf.getEntry('jadx/api/JadxDecompiler.class') != null
+            }
+        } catch (Exception ignored) {
+            false
+        }
+    }
+}
+
 tasks.register('fetchJadx') {
-    description = 'Downloads the official jadx distribution and extracts the engine jars.'
-    outputs.dir(jadxLibsDir)
+    description = 'Downloads the official jadx distribution and verifies the engine jar.'
     doLast {
-        def existing = jadxLibsDir.listFiles()?.findAll { it.name.endsWith('.jar') }
-        if (existing) {
-            logger.lifecycle("jadx jars found in ${jadxLibsDir} — skipping download.")
+        if (jadxEngineReady()) {
+            logger.lifecycle('jadx engine jar present and verified — skipping download.')
             return
         }
         jadxLibsDir.mkdirs()
+        jadxLibsDir.listFiles()?.each { it.delete() }   // clear stale/invalid extractions
+
         def zipFile = new File(jadxLibsDir, "jadx-${jadxVersion}.zip")
         def url = "https://github.com/skylot/jadx/releases/download/v${jadxVersion}/jadx-${jadxVersion}.zip"
         logger.lifecycle("Downloading jadx engine: ${url}")
         try {
-            new URL(url).withInputStream { ins ->
-                zipFile.withOutputStream { outs -> outs << ins }
-            }
+            new URL(url).withInputStream { ins -> zipFile.withOutputStream { outs -> outs << ins } }
         } catch (Exception e) {
             throw new GradleException("Could not download jadx from ${url} " +
                     "(internet required on the first build). Cause: ${e.message}")
         }
+
         int count = 0
         new java.util.zip.ZipFile(zipFile).withCloseable { zf ->
             zf.entries().each { entry ->
                 if (entry.isDirectory()) return
                 String name = entry.getName()
                 String base = name.substring(name.lastIndexOf('/') + 1)
-                boolean skip = !base.endsWith('.jar')
-                        || base.contains('jadx-gui')   // desktop Swing GUI — not usable on Android
-                        || base.contains('jadx-cli')   // CLI wrapper — not needed on Android
-                if (skip) return
+                if (!base.endsWith('.jar')) return
+                if (base.contains('jadx-gui')) return   // desktop Swing GUI — unusable on Android
                 new File(jadxLibsDir, base).withOutputStream { outs ->
                     zf.getInputStream(entry).withCloseable { ins -> outs << ins }
                 }
@@ -47,12 +62,19 @@ tasks.register('fetchJadx') {
             }
         }
         zipFile.delete()
-        if (count == 0) {
-            throw new GradleException("jadx zip downloaded but no jars were extracted — unexpected distribution layout.")
+
+        if (!jadxEngineReady()) {
+            throw new GradleException("Extracted ${count} jar(s) from the jadx distribution, but none " +
+                    "contains jadx/api/JadxDecompiler — unexpected distribution layout. Please report this.")
         }
-        logger.lifecycle("Extracted ${count} jadx jars into ${jadxLibsDir}")
+        logger.lifecycle("Extracted ${count} jadx jar(s) into ${jadxLibsDir} (engine verified).")
     }
 }
+
+// No outputs declaration: the jadxEngineReady() guard makes a verified no-op cheap,
+// and running every build guarantees a stale/broken extraction is never trusted.
+
+def jadxEngine = fileTree(dir: jadxLibsDir, include: ['*.jar']).builtBy('fetchJadx')
 
 android {
     namespace 'com.apklens.app'
@@ -76,7 +98,7 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-        coreLibraryDesugaringEnabled true   // jadx uses Java 11+ APIs (List.of, streams, …)
+        coreLibraryDesugaringEnabled true   // jadx uses Java 11+ APIs (List.of, java.nio.file, …)
     }
 
     packaging {
@@ -96,8 +118,7 @@ android {
 }
 
 dependencies {
-    // Vendored jadx engine jars, populated by fetchJadx before compilation.
-    implementation files(jadxLibsDir) { builtBy 'fetchJadx' }
+    implementation jadxEngine
 
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }
