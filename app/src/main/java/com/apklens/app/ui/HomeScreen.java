@@ -10,6 +10,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.animation.AlphaAnimation;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.TranslateAnimation;
@@ -36,7 +37,6 @@ import java.util.Locale;
 
 public class HomeScreen extends Screen {
 
-    private LinearLayout statsBox;
     private TextView statProjects, statLast, statStorage, runChip, storageHint;
     private ListView list;
     private LinearLayout emptyState;
@@ -106,14 +106,12 @@ public class HomeScreen extends Screen {
         statStorage.setPadding(0, Ui.dp(act, 6), 0, 0);
         colL.addView(statStorage);
 
-        // Animated dual-tone lens graphic (subtle, palette-driven)
         ImageView dashLogo = new ImageView(act);
         dashLogo.setImageResource(R.drawable.logo);
         dashLogo.setAlpha(0.95f);
         dashRow.addView(dashLogo, new LinearLayout.LayoutParams(
                 Ui.dp(act, 62), Ui.dp(act, 62)));
 
-        // Animated accent bar
         FrameLayout barHost = new FrameLayout(act);
         barHost.setBackgroundResource(Ui.BG);
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
@@ -136,41 +134,39 @@ public class HomeScreen extends Screen {
         hist.setPadding(pad, Ui.dp(act, 12), pad, Ui.dp(act, 6));
         content.addView(hist);
 
-        FrameMode: {
-            FrameLayout fl = new FrameLayout(act);
-            content.addView(fl, Ui.lpWeight(act, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        FrameLayout fl = new FrameLayout(act);
+        content.addView(fl, Ui.lpWeight(act, LinearLayout.LayoutParams.MATCH_PARENT, 1));
 
-            emptyState = new LinearLayout(act);
-            emptyState.setOrientation(LinearLayout.VERTICAL);
-            emptyState.setGravity(Gravity.CENTER);
-            ImageView big = new ImageView(act);
-            big.setImageResource(R.drawable.logo);
-            big.setAlpha(0.9f);
-            emptyState.addView(big, new LinearLayout.LayoutParams(
-                    Ui.dp(act, 96), Ui.dp(act, 96)));
-            TextView et = Ui.text(act, "No projects yet", 18, Ui.INK, true);
-            et.setPadding(0, Ui.dp(act, 14), 0, Ui.dp(act, 4));
-            emptyState.addView(et);
-            TextView es = Ui.text(act,
-                    "Tap the + button to create a project, pick an APK, and convert it into a\n"
-                    + "readable, Android-project-style folder structure delivered as a ZIP.",
-                    13, Ui.MUTED, false);
-            es.setGravity(Gravity.CENTER);
-            es.setPadding(Ui.dp(act, 32), 0, Ui.dp(act, 32), 0);
-            es.setLineSpacing(Ui.dp(act, 2), 1f);
-            emptyState.addView(es);
-            fl.addView(emptyState, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        emptyState = new LinearLayout(act);
+        emptyState.setOrientation(LinearLayout.VERTICAL);
+        emptyState.setGravity(Gravity.CENTER);
+        ImageView big = new ImageView(act);
+        big.setImageResource(R.drawable.logo);
+        big.setAlpha(0.9f);
+        emptyState.addView(big, new LinearLayout.LayoutParams(
+                Ui.dp(act, 96), Ui.dp(act, 96)));
+        TextView et = Ui.text(act, "No projects yet", 18, Ui.INK, true);
+        et.setPadding(0, Ui.dp(act, 14), 0, Ui.dp(act, 4));
+        emptyState.addView(et);
+        TextView es = Ui.text(act,
+                "Tap the + button to create a project, pick an APK, and convert it into a\n"
+                        + "readable, Android-project-style folder structure delivered as a ZIP.",
+                13, Ui.MUTED, false);
+        es.setGravity(Gravity.CENTER);
+        es.setPadding(Ui.dp(act, 32), 0, Ui.dp(act, 32), 0);
+        es.setLineSpacing(Ui.dp(act, 2), 1f);
+        emptyState.addView(es);
+        fl.addView(emptyState, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-            list = new ListView(act);
-            list.setDivider(null);
-            list.setDividerHeight(0);
-            list.setSelector(new android.graphics.drawable.ColorDrawable(0));
-            list.setPadding(pad, Ui.dp(act, 2), pad, Ui.dp(act, 110));
-            list.setClipToPadding(false);
-            fl.addView(list, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-        }
+        list = new ListView(act);
+        list.setDivider(null);
+        list.setDividerHeight(0);
+        list.setSelector(new android.graphics.drawable.ColorDrawable(0));
+        list.setPadding(pad, Ui.dp(act, 2), pad, Ui.dp(act, 110));
+        list.setClipToPadding(false);
+        fl.addView(list, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         // ---------- FAB ----------
         final FrameLayout.LayoutParams fabLp = new FrameLayout.LayoutParams(
@@ -191,7 +187,6 @@ public class HomeScreen extends Screen {
         list.setOnItemClickListener((parent, view, position, id) ->
                 showActions(adapter.getItem(position)));
 
-        // entrance animation for the dashboard card
         AlphaAnimation ea = new AlphaAnimation(0f, 1f);
         ea.setDuration(320);
         ea.setInterpolator(new DecelerateInterpolator());
@@ -243,7 +238,6 @@ public class HomeScreen extends Screen {
     public void onShow() {
         refresh();
 
-        // Deliver an unseen finished result exactly once.
         EngineResult r = EngineState.consumeUnseenResult();
         if (r != null) {
             act.push(new ResultScreen(act, r));
@@ -326,18 +320,20 @@ public class HomeScreen extends Screen {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
+            FrameLayout holder;
             LinearLayout row;
-            TextView name, sub;
             View dot;
-            if (convertView instanceof LinearLayout) {
-                row = (LinearLayout) convertView;
+            TextView name, sub;
+
+            if (convertView instanceof FrameLayout) {
+                holder = (FrameLayout) convertView;
+                row = (LinearLayout) holder.getChildAt(0);
                 dot = row.getChildAt(0);
                 LinearLayout col = (LinearLayout) row.getChildAt(1);
                 name = (TextView) col.getChildAt(0);
                 sub = (TextView) col.getChildAt(1);
             } else {
                 row = Ui.row(act);
-                row.setBackgroundResource(Ui.SURFACE);
                 GradientDrawable bg = Ui.round(Ui.SURFACE, 16, act);
                 row.setBackground(bg);
                 row.setElevation(Ui.dp(act, 2));
@@ -345,8 +341,7 @@ public class HomeScreen extends Screen {
                 row.setPadding(p, p, p, p);
 
                 dot = new View(act);
-                row.addView(dot, new LinearLayout.LayoutParams(
-                        Ui.dp(act, 10), Ui.dp(act, 10)));
+                row.addView(dot, new LinearLayout.LayoutParams(Ui.dp(act, 10), Ui.dp(act, 10)));
 
                 LinearLayout col = new LinearLayout(act);
                 col.setOrientation(LinearLayout.VERTICAL);
@@ -363,31 +358,27 @@ public class HomeScreen extends Screen {
                 TextView chev = Ui.text(act, "›", 20, Ui.MUTED, false);
                 row.addView(chev);
 
-                AbsListView.LayoutParams lp = new AbsListView.LayoutParams(
-                        AbsListView.LayoutParams.MATCH_PARENT, AbsListView.LayoutParams.WRAP_CONTENT);
-                row.setLayoutParams(lp);
-                FrameLayout holder = new FrameLayout(act);
+                holder = new FrameLayout(act);
                 int m = Ui.dp(act, 5);
                 holder.setPadding(0, m, 0, m);
                 holder.addView(row, new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
-                return holder;
             }
+
             ProjectRecord r = getItem(position);
             GradientDrawable d = Ui.circle(statusColor(r.status));
             dot.setBackground(d);
             name.setText(r.name);
             String size = r.zipSize > 0 ? " · " + Ui.human(r.zipSize) : "";
             sub.setText(r.apkName + " · " + fmt.format(new Date(r.date)) + " · " + r.status + size);
-            return row;
+            return holder;
         }
     }
 
-    // subtle pulse on the accent bar while visible
     private ObjectAnimator pulse;
 
     @Override
-    public void onAttachedToWindow() {
+    protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         pulse = ObjectAnimator.ofFloat(accentBar, "scaleX", 0.35f, 1f);
         pulse.setDuration(1500);
@@ -398,7 +389,7 @@ public class HomeScreen extends Screen {
     }
 
     @Override
-    public void onDetachedFromWindow() {
+    protected void onDetachedFromWindow() {
         if (pulse != null) pulse.cancel();
         super.onDetachedFromWindow();
     }
