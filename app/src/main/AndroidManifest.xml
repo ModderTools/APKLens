@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Only what is actually needed. File picking uses SAF (no permission).
+         WRITE is only used on Android <= 10 for the exact /storage/emulated/0/APKLens/ path. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Optional (Android 11+): enables the exact APKLens/ output folder. Never required. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
+    <application
+        android:name=".ApkLensApp"
+        android:allowBackup="false"
+        android:icon="@drawable/logo"
+        android:label="ApkLens"
+        android:largeHeap="true"
+        android:requestLegacyExternalStorage="true"
+        android:theme="@style/Theme.ApkLens">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".service.ConvertService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <provider
+            android:name=".platform.ZipProvider"
+            android:authorities="com.apklens.app.zipfiles"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+    </application>
+</manifest>
