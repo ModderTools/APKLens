@@ -243,9 +243,15 @@ public final class Pipeline {
             r.status = "FAILED";
             r.message = "Ran out of memory. Lower the thread count in Settings or use a smaller APK.";
             try { cfg.sink.abort(); } catch (Throwable ignored) {}
-        } catch (Exception e) {
+              } catch (Exception e) {
             r.status = "FAILED";
             r.message = "Conversion failed: " + e;
+            try { cfg.sink.abort(); } catch (Throwable ignored) {}
+        } catch (Throwable t) {
+            // Engine-level Errors (NoSuchMethodError, NoClassDefFoundError, …) land here
+            // so the UI always gets a clean failure and the sink never leaks a pending file.
+            r.status = "FAILED";
+            r.message = "Conversion failed (engine error): " + t;
             try { cfg.sink.abort(); } catch (Throwable ignored) {}
         }
         r.durationMs = System.currentTimeMillis() - t0;
