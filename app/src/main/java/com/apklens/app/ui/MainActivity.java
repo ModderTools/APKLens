@@ -16,7 +16,7 @@ import java.util.Map;
 
 /**
  * Single-activity host. Screens are programmatic FrameLayouts stacked in `root`.
- * Zero AndroidX — everything uses platform APIs only.
+ * Zero AndroidX — platform APIs only.
  */
 public class MainActivity extends android.app.Activity {
 
@@ -61,10 +61,11 @@ public class MainActivity extends android.app.Activity {
     public void push(Screen s) { push(s, true); }
 
     public void push(Screen s, boolean animate) {
+        // Build AFTER the subclass constructor has finished (fixes the
+        // constructor-calls-virtual NPE class), BEFORE any onShow() touches views.
+        s.ensureBuilt();
         if (!stack.isEmpty()) stack.peek().onHide();
         stack.push(s);
-        // Previous screen stays attached underneath (FrameLayout stacking) —
-        // pop() therefore only REMOVES the top; it must never re-add.
         root.addView(s, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         if (animate) {
@@ -80,7 +81,7 @@ public class MainActivity extends android.app.Activity {
         Screen cur = stack.pop();
         cur.onHide();
         root.removeView(cur);
-        // The previous screen is still attached underneath — just animate it back in.
+        // The previous screen is still attached underneath — animate it back in.
         Screen prev = stack.peek();
         AlphaAnimation a = new AlphaAnimation(0.55f, 1f);
         a.setDuration(150);
