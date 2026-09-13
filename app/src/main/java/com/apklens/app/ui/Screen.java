@@ -6,21 +6,32 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 
 /**
- * Base class for all screens. A screen is a FrameLayout built 100% in Java.
- * The MainActivity keeps a back-stack of screens; each screen can consume back presses.
+ * Base class for all screens: a FrameLayout built 100% in Java.
+ *
+ * TWO-PHASE CONSTRUCTION (important):
+ * The constructor does NOT call build(). A superclass constructor invoking an
+ * overridable method runs BEFORE subclass fields assigned in subclass
+ * constructors exist (ResultScreen.r was null -> NPE). Instead, MainActivity.push()
+ * calls ensureBuilt() once, after the subclass is fully constructed.
  */
 public abstract class Screen extends FrameLayout {
     protected final MainActivity act;
+    private boolean built = false;
 
     public Screen(MainActivity act) {
         super(act);
         this.act = act;
         setBackgroundColor(Ui.BG);
-        addView(build(), new FrameLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
     }
 
     protected abstract View build();
+
+    /** Builds the screen exactly once. Called by MainActivity.push() before onShow(). */
+    public final void ensureBuilt() {
+        if (built) return;
+        built = true;
+        addView(build(), new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+    }
 
     /** Called when the screen becomes the visible top of the stack. */
     public void onShow() {}
@@ -39,7 +50,7 @@ public abstract class Screen extends FrameLayout {
         if (withBack) {
             ImageView back = new ImageView(act);
             back.setImageResource(com.apklens.app.R.drawable.ic_back);
-            back.setBackground(new android.graphics.drawable.ColorDrawable(Color_TRANSPARENT()));
+            back.setBackground(new android.graphics.drawable.ColorDrawable(0x00000000));
             int bp = Ui.dp(act, 6);
             back.setPadding(bp, bp, bp, bp);
             back.setOnClickListener(v -> act.pop());
@@ -48,12 +59,8 @@ public abstract class Screen extends FrameLayout {
             lp.rightMargin = Ui.dp(act, 10);
             h.addView(back, lp);
         }
-        TextView_placeholder: {
-            android.widget.TextView t = Ui.text(act, title, 20, Ui.INK, true);
-            h.addView(t, Ui.lpWeight(act, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        }
+        android.widget.TextView t = Ui.text(act, title, 20, Ui.INK, true);
+        h.addView(t, Ui.lpWeight(act, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         return h;
     }
-
-    private static int Color_TRANSPARENT() { return 0x00000000; }
 }
