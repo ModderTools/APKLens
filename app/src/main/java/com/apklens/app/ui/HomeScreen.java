@@ -112,8 +112,12 @@ public class HomeScreen extends Screen {
         dashRow.addView(dashLogo, new LinearLayout.LayoutParams(
                 Ui.dp(act, 62), Ui.dp(act, 62)));
 
+        // FIX: setBackgroundResource() needs a RESOURCE ID — Ui.BG is a color int.
+        // Passing a color there threw Resources$NotFoundException on the very first
+        // frame and crashed the app on launch. setBackgroundColor() is correct here.
         FrameLayout barHost = new FrameLayout(act);
-        barHost.setBackgroundResource(Ui.BG);
+        barHost.setBackgroundColor(Ui.BG);
+
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 4));
         blp.topMargin = Ui.dp(act, 12);
