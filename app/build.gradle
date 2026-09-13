@@ -2,7 +2,7 @@ plugins { id 'com.android.application' }
 
 // ----------------------------------------------------------------------------
 // jadx-core ships as a merged GitHub-release jar containing the engine plus all
-// runtime dependencies — including two packages that are UNSAFE on Android:
+// runtime dependencies — including packages that are UNSAFE on Android:
 //
 //   • com/google/gson/**  — gson 2.10.1 calls Class.getModule() (Java 9+ JPMS,
 //     absent on ALL Android versions) → NoSuchMethodError at runtime. Fixed
@@ -106,8 +106,6 @@ tasks.register('fetchJadx') {
         jadxLibsDir.listFiles()?.findAll { it.name != finalJarName }?.each { it.delete() }
 
         // ---- diagnostic: which remaining packages still reference Class.getModule()? ----
-        // They are inert unless executed; this report pinpoints offenders instantly if a
-        // conversion ever fails with NoSuchMethodError again.
         def pkgCounts = [:]
         new java.util.zip.ZipFile(finalJar).withCloseable { zf ->
             zf.entries().each { e ->
@@ -143,7 +141,7 @@ android {
         applicationId "com.apklens.app"
         minSdk 26              // DEX invoke-polymorphic (MethodHandle.invoke) requires API 26+
         targetSdk 34
-        versionCode 2          // bumped for the fix
+        versionCode 2
         versionName "1.0.1"
         multiDexEnabled true
     }
@@ -181,7 +179,11 @@ dependencies {
 
     // Android-safe Gson — 2.11.0 fixed the bundled 2.10.1 crash
     // (NoSuchMethodError on Class.getModule) on Android.
-    implementation 'com.google.code.gson:gson:2.11.0'
+    // FIX: gson 2.11.0 transitively pulls error_prone_annotations, which the jadx
+    // fat jar already bundles — exclude it or checkDebugDuplicateClasses fails.
+    implementation('com.google.code.gson:gson:2.11.0') {
+        exclude group: 'com.google.errorprone', module: 'error_prone_annotations'
+    }
 
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }
