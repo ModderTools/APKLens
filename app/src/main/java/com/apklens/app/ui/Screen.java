@@ -51,15 +51,19 @@ public abstract class Screen extends FrameLayout {
             ImageView back = new ImageView(act);
             back.setImageResource(com.apklens.app.R.drawable.ic_back);
             back.setBackground(new android.graphics.drawable.ColorDrawable(0x00000000));
-            int bp = Ui.dp(act, 6);
+            int bp = Ui.dp(act, 10);
             back.setPadding(bp, bp, bp, bp);
-            back.setOnClickListener(v -> act.pop());
+            back.setContentDescription("Back");
+            back.setOnClickListener(v -> act.onBackPressed());
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    Ui.dp(act, 34), Ui.dp(act, 34));
-            lp.rightMargin = Ui.dp(act, 10);
+                    Ui.dp(act, 44), Ui.dp(act, 44));
+            lp.leftMargin = -Ui.dp(act, 8); // keep the arrow optically aligned with the page margin
+            lp.rightMargin = Ui.dp(act, 4);
             h.addView(back, lp);
         }
-        android.widget.TextView t = Ui.text(act, title, 20, Ui.INK, true);
+        android.widget.TextView t = Ui.text(act, title, 21, Ui.INK, true);
+        t.setSingleLine(true);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
         h.addView(t, Ui.lpWeight(act, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         return h;
     }

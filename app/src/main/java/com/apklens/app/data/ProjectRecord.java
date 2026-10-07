@@ -7,6 +7,7 @@ public class ProjectRecord {
     public String name = "";
     public String apkName = "";
     public String pkg = "";
+    public String label = "";
     public String version = "";
     public long date;
     public String status = "";
@@ -31,7 +32,7 @@ public class ProjectRecord {
         try {
             JSONObject o = new JSONObject();
             o.put("id", id); o.put("name", name); o.put("apkName", apkName);
-            o.put("pkg", pkg); o.put("version", version); o.put("date", date);
+            o.put("pkg", pkg); o.put("label", label); o.put("version", version); o.put("date", date);
             o.put("status", status); o.put("message", message == null ? "" : message);
             o.put("zipMode", zipMode); o.put("zipPath", zipPath); o.put("zipUri", zipUri);
             o.put("zipDisplay", zipDisplay); o.put("zipSize", zipSize); o.put("duration", duration);
@@ -44,7 +45,7 @@ public class ProjectRecord {
     public static ProjectRecord fromJson(JSONObject o) {
         ProjectRecord r = new ProjectRecord();
         r.id = o.optString("id"); r.name = o.optString("name");
-        r.apkName = o.optString("apkName"); r.pkg = o.optString("pkg");
+        r.apkName = o.optString("apkName"); r.pkg = o.optString("pkg"); r.label = o.optString("label");
         r.version = o.optString("version"); r.date = o.optLong("date");
         r.status = o.optString("status"); r.message = o.optString("message");
         r.zipMode = o.optString("zipMode"); r.zipPath = o.optString("zipPath");

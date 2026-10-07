@@ -23,6 +23,8 @@ public final class Ui {
     public static final int SURFACE = 0xFFFFFFFF;
     public static final int INK     = 0xFF21222D;
     public static final int ACCENT  = 0xFF958CE8;
+    /** Accent for small TEXT on white — #958CE8 is only ~3:1 there; this one is ~6:1. */
+    public static final int ACCENT_TEXT = 0xFF5A4FCF;
     public static final int ACCENT2 = 0xFFACD1FD;
     public static final int MUTED   = 0xFF6A6B78;
     public static final int LINE    = 0xFFE4E4EC;
@@ -148,12 +150,6 @@ public final class Ui {
         return p;
     }
 
-    public static View statusDot(Context c, int color, float sizeDp) {
-        View v = new View(c);
-        v.setBackground(circle(color));
-        return v;
-    }
-
     public static LinearLayout row(Context c) {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.HORIZONTAL);
@@ -175,6 +171,55 @@ public final class Ui {
         if (m == null) return;
         m.setMargins(l, t, r, b);
         v.setLayoutParams(m);
+    }
+
+    /** Small ALL-CAPS section label (uses the accessible accent). */
+    public static TextView label(Context c, String s) {
+        TextView t = text(c, s, 12, ACCENT_TEXT, true);
+        t.setLetterSpacing(0.06f);
+        return t;
+    }
+
+    /** Pill-shaped status chip. */
+    public static TextView chip(Context c, String s, int color) {
+        TextView t = text(c, s, 11.5f, color, true);
+        int fill = (color & 0x00FFFFFF) | 0x22000000;
+        GradientDrawable bg = round(fill, 999, c);
+        bg.setStroke(1, (color & 0x00FFFFFF) | 0x55000000);
+        t.setBackground(bg);
+        t.setPadding(dp(c, 10), dp(c, 3), dp(c, 10), dp(c, 3));
+        t.setSingleLine(true);
+        return t;
+    }
+
+    /** "label ........ value" row. */
+    public static LinearLayout kv(Context c, String k, String v) {
+        LinearLayout row = row(c);
+        row.setPadding(0, dp(c, 4), 0, dp(c, 4));
+        TextView kt = text(c, k, 13.5f, MUTED, false);
+        row.addView(kt, lpWeight(c, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView vt = text(c, v, 13.5f, INK, true);
+        vt.setGravity(Gravity.END);
+        row.addView(vt);
+        return row;
+    }
+
+    /** 1dp separator line. */
+    public static View divider(Context c) {
+        View v = new View(c);
+        v.setBackgroundColor(LINE);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(c, 1)));
+        lp.topMargin = dp(c, 10);
+        lp.bottomMargin = dp(c, 10);
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    public static String duration(long ms) {
+        long s = ms / 1000;
+        if (s < 60) return (ms < 10_000 ? String.format(java.util.Locale.US, "%.1f", ms / 1000.0) : String.valueOf(s)) + " s";
+        return (s / 60) + " min " + (s % 60) + " s";
     }
 
     public static String human(long bytes) {

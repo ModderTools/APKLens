@@ -33,6 +33,8 @@ public final class SafeZip {
         public boolean hasManifest;
         public int assetsCount;
         public int soCount;
+        /** Native library file names (libflutter.so, …) and notable asset markers. */
+        public final java.util.Set<String> markers = new java.util.TreeSet<>();
     }
 
     private SafeZip() {}
@@ -46,10 +48,18 @@ public final class SafeZip {
             long sz = e.getSize();
             if (sz > 0) s.totalUncompressed += Math.min(sz, MAX_PER_ENTRY);
             String n = e.getName();
-            if (n.matches("classes\\d*\\.dex")) { s.dexCount++; s.dexNames.add(n); }
+            if (Io.isDexName(n)) { s.dexCount++; s.dexNames.add(n); }
             if (n.equals("AndroidManifest.xml")) s.hasManifest = true;
             if (n.startsWith("assets/")) s.assetsCount++;
-            if (n.endsWith(".so")) s.soCount++;
+            if (n.endsWith(".so")) {
+                s.soCount++;
+                s.markers.add(n.substring(n.lastIndexOf('/') + 1));
+            }
+            if (n.equals("assets/index.android.bundle")) s.markers.add("index.android.bundle");
+            else if (n.startsWith("assets/flutter_assets/")) s.markers.add("flutter_assets");
+            else if (n.startsWith("assets/www/")) s.markers.add("assets/www"); // Cordova / Ionic
+            else if (n.startsWith("assets/bin/Data/")) s.markers.add("unity-data");
+            else if (n.startsWith("assemblies/") || n.endsWith(".dll")) s.markers.add("xamarin-dll");
         }
         log.line("scan: entries=" + s.entries + " totalUncompressed=" + Io.human(s.totalUncompressed)
                 + " dex=" + s.dexCount);
@@ -88,6 +98,12 @@ public final class SafeZip {
     /** Copies entries matching the filter from the APK into destRoot. Returns count. */
     public static int copyMatching(ZipFile zf, EntryFilter filter, File destRoot,
                                    long perEntryCap, List<String> warnings, EngineLog log) {
+        return copyMatching(zf, filter, "", destRoot, perEntryCap, warnings, log);
+    }
+
+    /** Same, but removes {@code stripPrefix} from each entry name (e.g. "lib/" → jniLibs/&lt;abi&gt;/x.so). */
+    public static int copyMatching(ZipFile zf, EntryFilter filter, String stripPrefix, File destRoot,
+                                   long perEntryCap, List<String> warnings, EngineLog log) {
         int count = 0;
         Enumeration<? extends ZipEntry> en = zf.entries();
         while (en.hasMoreElements()) {
@@ -95,7 +111,7 @@ public final class SafeZip {
             if (e.isDirectory()) continue;
             String n = e.getName();
             if (!filter.accept(n, e)) continue;
-            String rel = safeRel(stripPrefix(n));
+            String rel = safeRel(stripPrefix.isEmpty() || !n.startsWith(stripPrefix) ? n : n.substring(stripPrefix.length()));
             if (rel == null) {
                 warnings.add("Skipped unsafe entry: " + n);
                 continue;
@@ -122,51 +138,8 @@ public final class SafeZip {
         return count;
     }
 
-    private static String stripPrefix(String n) { return n; }
-
-    /** Copies entries under a prefix, stripping that prefix. */
-    public static int copyPrefix(ZipFile zf, String prefix, File destRoot,
-                                 long perEntryCap, List<String> warnings, EngineLog log) {
-        return copyMatching(zf, (n, e) -> n.startsWith(prefix), destRoot, perEntryCap, warnings, log) == -1
-                ? copyPrefixInternal(zf, prefix, destRoot, perEntryCap, warnings, log)
-                : copyPrefixInternal(zf, prefix, destRoot, perEntryCap, warnings, log);
-    }
-
-    private static int copyPrefixInternal(ZipFile zf, String prefix, File destRoot,
-                                          long perEntryCap, List<String> warnings, EngineLog log) {
-        int count = 0;
-        Enumeration<? extends ZipEntry> en = zf.entries();
-        while (en.hasMoreElements()) {
-            ZipEntry e = en.nextElement();
-            if (e.isDirectory()) continue;
-            String n = e.getName();
-            if (!n.startsWith(prefix)) continue;
-            String rel = safeRel(n.substring(prefix.length()));
-            if (rel == null) { warnings.add("Skipped unsafe entry: " + n); continue; }
-            File out = new File(destRoot, rel);
-            try {
-                checkTarget(destRoot, out);
-                out.getParentFile().mkdirs();
-                long size = e.getSize();
-                if (size > perEntryCap) {
-                    warnings.add("Skipped oversized entry: " + n + " (" + Io.human(size) + ")");
-                    continue;
-                }
-                try (InputStream in = new BufferedInputStream(zf.getInputStream(e));
-                     OutputStream os = new BufferedOutputStream(new FileOutputStream(out))) {
-                    Io.copy(in, os, perEntryCap);
-                }
-                count++;
-            } catch (IOException ex) {
-                warnings.add("Failed to extract " + n + ": " + ex.getMessage());
-                log.line("extract-fail " + n, ex);
-            }
-        }
-        return count;
-    }
-
     /** Copies small files at the APK root that no other stage handles. */
-    public static int copyRootFiles(ZipFile zf, File destRoot, Set60 skip,
+    public static int copyRootFiles(ZipFile zf, File destRoot, java.util.Set<String> skip,
                                     List<String> warnings, EngineLog log) {
         int count = 0;
         Enumeration<? extends ZipEntry> en = zf.entries();
@@ -181,6 +154,7 @@ public final class SafeZip {
             String rel = Io.sanitizeName(n);
             File out = new File(destRoot, rel);
             try {
+                destRoot.mkdirs();
                 checkTarget(destRoot, out);
                 try (InputStream in = new BufferedInputStream(zf.getInputStream(e));
                      OutputStream os = new BufferedOutputStream(new FileOutputStream(out))) {
@@ -192,13 +166,6 @@ public final class SafeZip {
             }
         }
         return count;
-    }
-
-    /** Tiny set helper to avoid pulling java.util.HashSet into call sites. */
-    public static final class Set60 {
-        private final List<String> items = new ArrayList<>();
-        public void add(String s) { items.add(s); }
-        public boolean contains(String s) { return items.contains(s); }
     }
 
     public static boolean isMetaInfArtifact(String name) {

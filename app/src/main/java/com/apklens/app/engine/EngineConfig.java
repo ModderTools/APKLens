@@ -13,6 +13,10 @@ public class EngineConfig {
     public boolean smali;
     public boolean rawDex;
     public boolean metaInf;
+    /** jadx deobfuscation: gives short/meaningless names readable aliases. */
+    public boolean deobf;
+    /** Extract URLs, libraries, framework hints and secret-pattern findings for the report. */
+    public boolean analyze = true;
     public int threads = 4;
     public ZipSink sink;
 }

@@ -105,6 +105,15 @@ public final class Io {
         return String.format(java.util.Locale.US, "%.1f %s", v, u[i]);
     }
 
+    /** classes.dex, classes2.dex, … at the archive root (no regex: called once per entry). */
+    public static boolean isDexName(String n) {
+        if (!n.startsWith("classes") || !n.endsWith(".dex")) return false;
+        for (int i = 7; i < n.length() - 4; i++) {
+            if (!Character.isDigit(n.charAt(i))) return false;
+        }
+        return true;
+    }
+
     /** Sanitizes a single path segment (file or directory name). */
     public static String sanitizeName(String s) {
         StringBuilder b = new StringBuilder();

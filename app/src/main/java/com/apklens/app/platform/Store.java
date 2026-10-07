@@ -59,15 +59,17 @@ public final class Store {
         } catch (Exception e) { return "?"; }
     }
 
-    public static void clearWorkCache(Context c) {
-        Io.deleteRecursively(new File(c.getCacheDir(), "work"));
+    public static void clearWorkCache(Context c) { clearWorkCache(c, 0); }
+
+    /** Deletes scratch data older than {@code minAgeMs} (0 = everything). */
+    public static void clearWorkCache(Context c, long minAgeMs) {
+        long cutoff = System.currentTimeMillis() - minAgeMs;
         File[] files = c.getCacheDir().listFiles();
-        if (files != null) {
-            for (File f : files) {
-                if (f.getName().startsWith("picked_") || f.getName().startsWith("work_")) {
-                    Io.deleteRecursively(f);
-                }
-            }
+        if (files == null) return;
+        for (File f : files) {
+            String n = f.getName();
+            boolean ours = n.equals("work") || n.startsWith("picked_") || n.startsWith("work_");
+            if (ours && f.lastModified() <= cutoff) Io.deleteRecursively(f);
         }
     }
 

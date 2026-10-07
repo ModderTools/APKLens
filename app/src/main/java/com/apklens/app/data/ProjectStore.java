@@ -28,10 +28,12 @@ public final class ProjectStore {
         File f = file(c);
         if (!f.isFile()) return out;
         try (InputStream in = new FileInputStream(f)) {
-            byte[] buf = new byte[(int) f.length()];
-            int read = in.read(buf);
-            if (read <= 0) return out;
-            JSONArray arr = new JSONArray(new String(buf, StandardCharsets.UTF_8));
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            int n;
+            while ((n = in.read(chunk)) > 0) bos.write(chunk, 0, n); // read() may return fewer bytes than asked
+            if (bos.size() == 0) return out;
+            JSONArray arr = new JSONArray(new String(bos.toByteArray(), StandardCharsets.UTF_8));
             for (int i = 0; i < arr.length(); i++) {
                 out.add(ProjectRecord.fromJson(arr.getJSONObject(i)));
             }
@@ -43,9 +45,16 @@ public final class ProjectStore {
         JSONArray arr = new JSONArray();
         for (ProjectRecord r : list) arr.put(r.toJson());
         File f = file(c);
-        try (OutputStream os = new FileOutputStream(f)) {
+        // Write to a temp file and rename: a crash/kill mid-write must never wipe the whole history.
+        File tmp = new File(f.getParentFile(), f.getName() + ".tmp");
+        try (FileOutputStream os = new FileOutputStream(tmp)) {
             os.write(arr.toString().getBytes(StandardCharsets.UTF_8));
-        } catch (Exception ignored) {}
+            os.getFD().sync();
+        } catch (Exception e) {
+            tmp.delete();
+            return;
+        }
+        if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f); }
     }
 
     public static synchronized void upsert(Context c, ProjectRecord rec) {
@@ -55,6 +64,8 @@ public final class ProjectStore {
         if (list.size() > 100) list.subList(100, list.size()).clear();
         save(c, list);
     }
+
+    public static synchronized void clear(Context c) { file(c).delete(); }
 
     public static synchronized boolean remove(Context c, String id) {
         List<ProjectRecord> list = load(c);

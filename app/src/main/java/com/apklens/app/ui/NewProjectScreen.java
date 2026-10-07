@@ -6,6 +6,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.OpenableColumns;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -14,8 +16,6 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.apklens.app.R;
-import com.apklens.app.data.Prefs;
 import com.apklens.app.engine.Io;
 import com.apklens.app.engine.ZipPreview;
 import com.apklens.app.platform.Store;
@@ -23,7 +23,6 @@ import com.apklens.app.service.ConvertService;
 import com.apklens.app.service.EngineState;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 
@@ -38,6 +37,8 @@ public class NewProjectScreen extends Screen {
     private String apkDisplayName = "";
     private long apkSize = -1;
     private ZipPreview.Summary preview;
+    private boolean importing;
+    private boolean nameTouched;       // user typed a name → never overwrite it automatically
     private Runnable pendingAfterWritePerm;
 
     public NewProjectScreen(MainActivity act) { super(act); }
@@ -46,6 +47,7 @@ public class NewProjectScreen extends Screen {
     protected View build() {
         ScrollView scroll = new ScrollView(act);
         scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
         LinearLayout root = new LinearLayout(act);
         root.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(root, new ScrollView.LayoutParams(
@@ -60,22 +62,16 @@ public class NewProjectScreen extends Screen {
         clp.setMargins(pad, Ui.dp(act, 4), pad, pad);
         root.addView(card, clp);
 
-        card.addView(Ui.text(act, "PROJECT NAME", 12, Ui.ACCENT, true));
-        nameEt = Ui.editText(act, "e.g. My First Analysis");
-        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 50));
-        nlp.topMargin = Ui.dp(act, 8);
-        card.addView(nameEt, nlp);
-
-        card.addView(spacer(18));
-        card.addView(Ui.text(act, "APK FILE", 12, Ui.ACCENT, true));
+        card.addView(Ui.label(act, "APK FILE"));
 
         Button pick = Ui.outline(act, "Choose APK from storage…", Ui.ACCENT, Ui.INK);
         LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 50));
+                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 52));
         plp.topMargin = Ui.dp(act, 8);
         pick.setOnClickListener(v -> startPicker());
         card.addView(pick, plp);
+        card.addView(Ui.text(act, "Also works with .xapk / .apks / .apkm split bundles — "
+                + "or use “Open with ApkLens” from any file manager.", 12, Ui.MUTED, false));
 
         selCard = Ui.card(act);
         GradientDrawable selBg = Ui.roundStroke(act, 0xFFF6F6FA, Ui.LINE, 14);
@@ -92,9 +88,29 @@ public class NewProjectScreen extends Screen {
         selMeta = Ui.text(act, "", 12.5f, Ui.MUTED, false);
         selMeta.setPadding(0, Ui.dp(act, 3), 0, 0);
         selCard.addView(selMeta);
-        selPreview = Ui.text(act, "Reading APK…", 12.5f, Ui.ACCENT, false);
+        selPreview = Ui.text(act, "", 12.5f, Ui.ACCENT_TEXT, false);
         selPreview.setPadding(0, Ui.dp(act, 6), 0, 0);
         selCard.addView(selPreview);
+
+        View sp = new View(act);
+        card.addView(sp, new LinearLayout.LayoutParams(1, Ui.dp(act, 18)));
+        card.addView(Ui.label(act, "PROJECT NAME"));
+        nameEt = Ui.editText(act, "e.g. My First Analysis");
+        nameEt.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 50));
+        nlp.topMargin = Ui.dp(act, 8);
+        card.addView(nameEt, nlp);
+        // FIX: the original never re-evaluated the button when the name changed, so typing the
+        // name AFTER choosing the APK left "Convert" disabled forever.
+        nameEt.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable e) {
+                if (nameEt.hasFocus()) nameTouched = true;
+                maybeEnableConvert();
+            }
+        });
 
         statusLine = Ui.text(act, "", 13, Ui.WARN, false);
         statusLine.setPadding(0, Ui.dp(act, 12), 0, 0);
@@ -123,22 +139,33 @@ public class NewProjectScreen extends Screen {
         return scroll;
     }
 
-    private View spacer(int dp) {
-        View v = new View(act);
-        v.setLayoutParams(new LinearLayout.LayoutParams(1, Ui.dp(act, dp)));
-        return v;
-    }
-
     @Override
-    public void onShow() { updateRunningState(); }
+    public void onShow() { updateRunningState(); maybeEnableConvert(); }
+
+    /** The screen is going away without converting → don't leave a multi-hundred-MB copy in cache. */
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        if (stagedApk != null && !EngineState.isRunning() && !handedToService) {
+            Io.deleteRecursively(stagedApk);
+            stagedApk = null;
+        }
+    }
+    private boolean handedToService;
 
     private void updateRunningState() {
+        if (statusLine == null) return;
         if (EngineState.getPhase() == EngineState.Phase.RUNNING) {
-            statusLine.setVisibility(View.VISIBLE);
-            statusLine.setText("A conversion is already running — finish or cancel it first.");
-            convertBtn.setEnabled(false);
-            convertBtn.setAlpha(0.45f);
+            showStatus("A conversion is already running — finish or cancel it first.", Ui.WARN);
+        } else if (statusLine.getCurrentTextColor() == Ui.WARN && !importing) {
+            statusLine.setVisibility(View.GONE);
         }
+    }
+
+    private void showStatus(String msg, int color) {
+        statusLine.setText(msg);
+        statusLine.setTextColor(color);
+        statusLine.setVisibility(View.VISIBLE);
     }
 
     private void startPicker() {
@@ -157,68 +184,133 @@ public class NewProjectScreen extends Screen {
     /** Called by MainActivity with the SAF result. */
     public void onApkPicked(int resultCode, Intent data) {
         if (resultCode != android.app.Activity.RESULT_OK || data == null || data.getData() == null) return;
-        Uri uri = data.getData();
+        importUri(data.getData());
+    }
 
-        // Read display name + size via OpenableColumns
+    /** Imports a content:// or file:// APK (picker result, "Open with", or share). */
+    public void importUri(Uri uri) {
+        if (importing) return;
         apkDisplayName = "selected.apk";
         apkSize = -1;
         try (Cursor c = act.getContentResolver().query(uri, null, null, null, null)) {
             if (c != null && c.moveToFirst()) {
                 int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
                 int si = c.getColumnIndex(OpenableColumns.SIZE);
-                if (ni >= 0) apkDisplayName = c.getString(ni);
+                if (ni >= 0 && c.getString(ni) != null) apkDisplayName = c.getString(ni);
                 if (si >= 0 && !c.isNull(si)) apkSize = c.getLong(si);
             }
         } catch (Exception ignored) {}
+        if ("file".equals(uri.getScheme()) && uri.getLastPathSegment() != null) {
+            apkDisplayName = uri.getLastPathSegment();
+        }
 
+        // Fail fast when the phone cannot hold a working copy — much better than dying at 90%.
+        long free = act.getCacheDir().getUsableSpace();
+        if (apkSize > 0 && free > 0 && free < apkSize * 4) {
+            showStatus("Not enough free storage: need about " + Io.human(apkSize * 4)
+                    + " of working space, only " + Io.human(free) + " is free.", Ui.BAD);
+            return;
+        }
+
+        discardStaged();
         selCard.setVisibility(View.VISIBLE);
         selName.setText(apkDisplayName);
         selMeta.setText(apkSize >= 0 ? Ui.human(apkSize) : "");
+        selPreview.setTextColor(Ui.ACCENT_TEXT);
         selPreview.setText("Importing APK…");
-        convertBtn.setEnabled(false);
-        convertBtn.setAlpha(0.45f);
+        statusLine.setVisibility(View.GONE);
+        importing = true;
+        setConvertEnabled(false);
 
         final Uri u = uri;
         new Thread(() -> {
+            File out = new File(act.getCacheDir(), "picked_" + System.currentTimeMillis() + ".apk");
             try {
-                File out = new File(act.getCacheDir(), "picked_" + System.currentTimeMillis() + ".apk");
                 long cap = 4L * 1024 * 1024 * 1024; // 4 GB import guard
                 try (InputStream in = act.getContentResolver().openInputStream(u);
                      FileOutputStream os = new FileOutputStream(out)) {
                     if (in == null) throw new java.io.IOException("Cannot open selected file");
                     Io.copy(in, os, cap);
                 }
-                stagedApk = out;
-                if (apkSize < 0) apkSize = out.length();
-                preview = ZipPreview.scan(out);
-                act.runOnUiThread(this::onStagedReady);
-            } catch (Exception e) {
+                final ZipPreview.Summary sum = ZipPreview.scan(out);
+                final long size = out.length();
                 act.runOnUiThread(() -> {
+                    importing = false;
+                    stagedApk = out;
+                    preview = sum;
+                    if (apkSize < 0) { apkSize = size; selMeta.setText(Ui.human(size)); }
+                    onStagedReady();
+                });
+            } catch (Exception e) {
+                Io.deleteRecursively(out);
+                act.runOnUiThread(() -> {
+                    importing = false;
+                    selPreview.setTextColor(Ui.BAD);
                     selPreview.setText("Import failed: " + e.getMessage());
-                    Toast.makeText(act, "Could not read that file as an APK", Toast.LENGTH_LONG).show();
+                    Toast.makeText(act, "Could not read that file", Toast.LENGTH_LONG).show();
                 });
             }
         }, "apklens-import").start();
     }
 
+    private void discardStaged() {
+        if (stagedApk != null) { Io.deleteRecursively(stagedApk); stagedApk = null; }
+        preview = null;
+    }
+
     private void onStagedReady() {
         if (preview == null) return;
+        if (!preview.valid) {
+            selPreview.setTextColor(Ui.BAD);
+            selPreview.setText("Not a valid ZIP/APK archive — the file may be corrupted.");
+            discardStaged();
+            setConvertEnabled(false);
+            return;
+        }
+        if (!preview.convertible()) {
+            selPreview.setTextColor(Ui.BAD);
+            selPreview.setText("This ZIP has no AndroidManifest.xml and no classes.dex — it is not an APK.");
+            discardStaged();
+            setConvertEnabled(false);
+            return;
+        }
         StringBuilder sb = new StringBuilder();
-        sb.append(preview.dexCount == 0 ? "No DEX found"
-                : preview.dexCount + " DEX file" + (preview.dexCount > 1 ? "s" : ""));
-        sb.append(preview.hasManifest ? " · manifest ✓" : " · manifest ✗");
-        sb.append(preview.hasArsc ? " · resources ✓" : "");
-        if (preview.assetCount > 0) sb.append(" · assets: ").append(preview.assetCount);
-        if (!preview.abis.isEmpty()) sb.append(" · native: ").append(preview.abis);
+        if (preview.bundle) {
+            sb.append("Split bundle · ").append(preview.innerApks).append(" APKs · base: ")
+                    .append(preview.baseApk);
+        } else {
+            sb.append(preview.dexCount == 0 ? "No DEX found"
+                    : preview.dexCount + " DEX file" + (preview.dexCount > 1 ? "s" : ""));
+            sb.append(preview.hasManifest ? " · manifest ✓" : " · manifest ✗");
+            if (preview.hasArsc) sb.append(" · resources ✓");
+            if (preview.assetCount > 0) sb.append(" · assets: ").append(preview.assetCount);
+            if (!preview.abis.isEmpty()) sb.append(" · native: ").append(preview.abis);
+        }
+        selPreview.setTextColor(Ui.ACCENT_TEXT);
         selPreview.setText(sb.toString());
+
+        // Suggest a name from the file name, but never overwrite something the user typed.
+        if (!nameTouched || nameEt.getText().toString().trim().isEmpty()) {
+            String base = apkDisplayName.replaceAll("(?i)\\.(apk|xapk|apks|apkm)$", "");
+            nameEt.setText(sanitize(base));
+            nameEt.setSelection(nameEt.getText().length());
+            nameTouched = false;
+        }
         maybeEnableConvert();
     }
 
+    private void setConvertEnabled(boolean on) {
+        if (convertBtn == null) return;
+        convertBtn.setEnabled(on);
+        convertBtn.setAlpha(on ? 1f : 0.45f);
+    }
+
     private void maybeEnableConvert() {
-        boolean ok = stagedApk != null && nameEt.getText().toString().trim().length() > 0
+        if (convertBtn == null || nameEt == null) return;
+        boolean ok = stagedApk != null && !importing
+                && !sanitize(nameEt.getText().toString().trim()).isEmpty()
                 && EngineState.getPhase() != EngineState.Phase.RUNNING;
-        convertBtn.setEnabled(ok);
-        convertBtn.setAlpha(ok ? 1f : 0.45f);
+        setConvertEnabled(ok);
     }
 
     private void onConvert() {
@@ -262,6 +354,7 @@ public class NewProjectScreen extends Screen {
 
         act.ensureNotifPermission(); // fire-and-forget on API 33+
 
+        handedToService = true; // the service now owns (and deletes) the staged copy
         ConvertService.start(act, stagedApk.getAbsolutePath(), projectName,
                 apkDisplayName, apkSize);
         act.push(new ProgressScreen(act));
@@ -275,6 +368,6 @@ public class NewProjectScreen extends Screen {
         }
         String r = b.toString().trim().replaceAll(" +", " ");
         if (r.length() > 60) r = r.substring(0, 60);
-        return r.replaceAll("^[._]+|[._]+$", "");
+        return r.replaceAll("^[._ ]+|[._ ]+$", "");
     }
 }

@@ -68,9 +68,9 @@ public class HomeScreen extends Screen {
         tl.leftMargin = Ui.dp(act, 10);
         top.addView(title, tl);
 
-        top.addView(iconButton(R.drawable.ic_settings, () -> act.push(new SettingsScreen(act))));
-        top.addView(iconButton(R.drawable.ic_info, () -> act.push(new AppInfoScreen(act))));
-        top.addView(iconButton(R.drawable.ic_dev, () -> act.push(new DeveloperInfoScreen(act))));
+        top.addView(iconButton(R.drawable.ic_settings, "Settings", () -> act.push(new SettingsScreen(act))));
+        top.addView(iconButton(R.drawable.ic_info, "App info", () -> act.push(new AppInfoScreen(act))));
+        top.addView(iconButton(R.drawable.ic_dev, "Developer info", () -> act.push(new DeveloperInfoScreen(act))));
         content.addView(top);
 
         // ---------- Dashboard card ----------
@@ -101,6 +101,8 @@ public class HomeScreen extends Screen {
         statProjects = Ui.text(act, "Projects: 0", 13, Ui.MUTED, false);
         colL.addView(statProjects);
         statLast = Ui.text(act, "Last: —", 13, Ui.MUTED, false);
+        statLast.setSingleLine(true);
+        statLast.setEllipsize(android.text.TextUtils.TruncateAt.END);
         colL.addView(statLast);
         statStorage = Ui.text(act, "", 12, Ui.MUTED, false);
         statStorage.setPadding(0, Ui.dp(act, 6), 0, 0);
@@ -183,6 +185,7 @@ public class HomeScreen extends Screen {
         fab.setBackground(new android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(0x33FFFFFF), circle, null));
         fab.setElevation(Ui.dp(act, 8));
+        fab.setContentDescription("New project");
         fab.setOnClickListener(v -> onFab());
         outer.addView(fab, fabLp);
 
@@ -191,26 +194,29 @@ public class HomeScreen extends Screen {
         list.setOnItemClickListener((parent, view, position, id) ->
                 showActions(adapter.getItem(position)));
 
-        AlphaAnimation ea = new AlphaAnimation(0f, 1f);
-        ea.setDuration(320);
-        ea.setInterpolator(new DecelerateInterpolator());
-        TranslateAnimation ta = new TranslateAnimation(0, 0, Ui.dp(act, 18), 0);
-        ta.setDuration(320);
-        ta.setInterpolator(new DecelerateInterpolator());
-        dash.startAnimation(ea);
-        dash.startAnimation(ta);
+        // BUG FIX: calling startAnimation() twice replaces the first animation — combine them.
+        android.view.animation.AnimationSet in = new android.view.animation.AnimationSet(true);
+        in.setInterpolator(new DecelerateInterpolator());
+        in.setDuration(320);
+        in.addAnimation(new AlphaAnimation(0f, 1f));
+        in.addAnimation(new TranslateAnimation(0, 0, Ui.dp(act, 18), 0));
+        dash.startAnimation(in);
         return outer;
     }
 
-    private ImageView iconButton(int res, Runnable onClick) {
+    private ImageView iconButton(int res, String description, Runnable onClick) {
         ImageView iv = new ImageView(act);
         iv.setImageResource(res);
-        int p = Ui.dp(act, 7);
+        iv.setContentDescription(description);
+        int p = Ui.dp(act, 10);
         iv.setPadding(p, p, p, p);
+        iv.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(0x22000000), null,
+                Ui.circle(0xFFFFFFFF)));
         iv.setOnClickListener(v -> onClick.run());
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                Ui.dp(act, 36), Ui.dp(act, 36));
-        lp.leftMargin = Ui.dp(act, 4);
+                Ui.dp(act, 44), Ui.dp(act, 44));
+        lp.leftMargin = Ui.dp(act, 2);
         iv.setLayoutParams(lp);
         return iv;
     }
@@ -247,7 +253,6 @@ public class HomeScreen extends Screen {
             act.push(new ResultScreen(act, r));
             return;
         }
-        if (adapter != null) adapter.reload();
     }
 
     private void refresh() {
@@ -262,8 +267,9 @@ public class HomeScreen extends Screen {
         statStorage.setText("Output: " + Store.describeMode(act));
 
         boolean running = EngineState.getPhase() == EngineState.Phase.RUNNING;
+        syncPulse(running);
         runChip.setText(running ? "RUNNING" : "READY");
-        runChip.setTextColor(running ? Ui.ACCENT : Ui.OK);
+        runChip.setTextColor(running ? Ui.ACCENT_TEXT : Ui.OK);
         GradientDrawable chipBg = Ui.round(running ? 0x1F958CE8 : 0x1F3BA55D, 999, act);
         chipBg.setStroke(1, running ? 0x33958CE8 : 0x333BA55D);
         runChip.setBackground(chipBg);
@@ -354,6 +360,8 @@ public class HomeScreen extends Screen {
                 clp.leftMargin = Ui.dp(act, 12);
                 row.addView(col, clp);
                 name = Ui.text(act, "", 15, Ui.INK, true);
+                name.setSingleLine(true);
+                name.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 col.addView(name);
                 sub = Ui.text(act, "", 12, Ui.MUTED, false);
                 sub.setPadding(0, Ui.dp(act, 2), 0, 0);
@@ -372,24 +380,42 @@ public class HomeScreen extends Screen {
             ProjectRecord r = getItem(position);
             GradientDrawable d = Ui.circle(statusColor(r.status));
             dot.setBackground(d);
-            name.setText(r.name);
+            name.setText(r.label != null && !r.label.isEmpty() && !r.label.equals(r.name)
+                    ? r.name + "  ·  " + r.label : r.name);
             String size = r.zipSize > 0 ? " · " + Ui.human(r.zipSize) : "";
-            sub.setText(r.apkName + " · " + fmt.format(new Date(r.date)) + " · " + r.status + size);
+            String pkg = r.pkg != null && !r.pkg.isEmpty() ? r.pkg + "\n" : "";
+            boolean missing = r.isDirectFile() && r.zipPath != null && !r.zipPath.isEmpty()
+                    && !new java.io.File(r.zipPath).isFile();
+            sub.setText(pkg + fmt.format(new Date(r.date)) + " · " + r.status + size
+                    + (missing ? " · file moved/deleted" : ""));
             return holder;
         }
     }
 
     private ObjectAnimator pulse;
 
+    /** The dashboard bar pulses only while a conversion is running (saves battery, adds meaning). */
+    private void syncPulse(boolean running) {
+        if (accentBar == null) return;
+        if (running && isAttachedToWindow()) {
+            if (pulse == null || !pulse.isStarted()) {
+                pulse = ObjectAnimator.ofFloat(accentBar, "scaleX", 0.35f, 1f);
+                pulse.setDuration(1500);
+                pulse.setRepeatCount(ValueAnimator.INFINITE);
+                pulse.setRepeatMode(ValueAnimator.REVERSE);
+                pulse.setInterpolator(new DecelerateInterpolator());
+                pulse.start();
+            }
+        } else {
+            if (pulse != null) pulse.cancel();
+            accentBar.setScaleX(1f);
+        }
+    }
+
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        pulse = ObjectAnimator.ofFloat(accentBar, "scaleX", 0.35f, 1f);
-        pulse.setDuration(1500);
-        pulse.setRepeatCount(ValueAnimator.INFINITE);
-        pulse.setRepeatMode(ValueAnimator.REVERSE);
-        pulse.setInterpolator(new DecelerateInterpolator());
-        pulse.start();
+        syncPulse(EngineState.getPhase() == EngineState.Phase.RUNNING);
     }
 
     @Override

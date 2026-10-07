@@ -46,6 +46,10 @@ public class SettingsScreen extends Screen {
                 "Produce raw, low-level output for APKs that resist normal decompilation."));
         card.addView(switchRow(p, "inconsistent", "Try harder (inconsistent code)",
                 "Emit code even when the decompiler could not verify it completely."));
+        card.addView(switchRow(p, "deobf", "Deobfuscation (readable aliases)",
+                "Renames short ProGuard/R8 names (a, b, aa…) in the Java output. Smali keeps the real names."));
+        card.addView(switchRow(p, "analyze", "Analyze code (URLs, libraries, secrets)",
+                "Scans decompiled code for URLs, SDKs and hard-coded key patterns. Adds a section to the report."));
         card.addView(switchRow(p, "smali", "Generate Smali files",
                 "Adds a smali/ tree — the exact, always-readable representation of the bytecode."));
         card.addView(switchRow(p, "rawDex", "Include raw DEX files",
@@ -64,8 +68,8 @@ public class SettingsScreen extends Screen {
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int v, boolean fromUser) {
                 int t = v + 1;
-                p.setThreads(t);
                 threadsLabel.setText("Decompile threads: " + t);
+                if (fromUser) p.setThreads(t);
             }
             @Override public void onStartTrackingTouch(SeekBar s) {}
             @Override public void onStopTrackingTouch(SeekBar s) {}
@@ -114,11 +118,31 @@ public class SettingsScreen extends Screen {
         root.addView(mCard, cardParams(pad));
         android.widget.Button clear = Ui.outline(act, "Clear cached working files", Ui.BAD, Ui.BAD);
         clear.setOnClickListener(v -> {
+            if (com.apklens.app.service.EngineState.isRunning()) {
+                // Deleting work_* mid-run would corrupt the conversion in progress.
+                Toast.makeText(act, "A conversion is running — try again when it finishes",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
             Store.clearWorkCache(act);
             Toast.makeText(act, "Cache cleared", Toast.LENGTH_SHORT).show();
         });
         mCard.addView(clear, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 46)));
+
+        android.widget.Button clearHist = Ui.outline(act, "Clear project history", Ui.BAD, Ui.BAD);
+        clearHist.setOnClickListener(v -> new android.app.AlertDialog.Builder(act)
+                .setTitle("Clear history?")
+                .setMessage("Removes the list only. Exported ZIP files are kept.")
+                .setPositiveButton("Clear", (d, w) -> {
+                    com.apklens.app.data.ProjectStore.clear(act);
+                    Toast.makeText(act, "History cleared", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null).show());
+        LinearLayout.LayoutParams chp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(act, 46));
+        chp.topMargin = Ui.dp(act, 10);
+        mCard.addView(clearHist, chp);
 
         TextView ver = Ui.text(act, "ApkLens v" + Store.appVersion(act)
                 + "  ·  Engine: jadx-core (Apache-2.0)", 11.5f, Ui.MUTED, false);
@@ -129,7 +153,8 @@ public class SettingsScreen extends Screen {
     }
 
     private TextView sectionLabel(String s, int pad) {
-        TextView t = Ui.text(act, s, 12, Ui.MUTED, true);
+        TextView t = Ui.label(act, s);
+        t.setTextColor(Ui.MUTED);
         t.setPadding(pad, Ui.dp(act, 14), pad, Ui.dp(act, 6));
         return t;
     }
@@ -146,7 +171,7 @@ public class SettingsScreen extends Screen {
         row.setOrientation(LinearLayout.VERTICAL);
         Switch sw = Ui.tintedSwitch(act);
         sw.setText(title);
-        sw.setChecked(p.get(key, "inconsistent".equals(key) || "smali".equals(key) || "metaInf".equals(key)));
+        sw.setChecked(p.flag(key)); // defaults live in Prefs — same ones the service uses
         sw.setOnCheckedChangeListener((b, on) -> p.set(key, on));
         row.addView(sw);
         TextView d = Ui.text(act, desc, 11.5f, Ui.MUTED, false);

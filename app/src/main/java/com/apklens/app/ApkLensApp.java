@@ -14,6 +14,11 @@ public class ApkLensApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        // A fresh process cannot have a conversion running yet (the service is not sticky), so any
+        // picked_*/work_* leftovers are from a run the OS killed — they can be hundreds of MB.
+        new Thread(() -> {
+            try { com.apklens.app.platform.Store.clearWorkCache(this, 10 * 60 * 1000L); } catch (Throwable ignored) {}
+        }, "apklens-cache-gc").start();
         final Thread.UncaughtExceptionHandler prior = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
             try {

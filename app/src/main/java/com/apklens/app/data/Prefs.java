@@ -19,5 +19,15 @@ public class Prefs {
         return sp.getInt("threads", def);
     }
 
+    /** Defaults shared by the Settings screen and the conversion service (single source of truth). */
+    public static boolean defaultFor(String key) {
+        switch (key) {
+            case "inconsistent": case "smali": case "metaInf": case "analyze": return true;
+            default: return false; // fallback, rawDex, deobf
+        }
+    }
+
+    public boolean flag(String key) { return sp.getBoolean(key, defaultFor(key)); }
+
     public void setThreads(int t) { sp.edit().putInt("threads", Math.max(1, Math.min(8, t))).apply(); }
 }

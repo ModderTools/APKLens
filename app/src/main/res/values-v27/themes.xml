@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The nav bar is white (see values/themes.xml): without this flag the system draws WHITE
+         back/home icons on it, which makes them invisible on Android 8.1+. -->
+    <style name="Theme.ApkLens" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#958CE8</item>
+        <item name="android:colorPrimaryDark">#DBDBE5</item>
+        <item name="android:colorAccent">#958CE8</item>
+        <item name="android:windowBackground">#DBDBE5</item>
+        <item name="android:statusBarColor">#DBDBE5</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:textColorPrimary">#21222D</item>
+    </style>
+</resources>

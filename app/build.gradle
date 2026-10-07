@@ -15,6 +15,9 @@ plugins { id 'com.android.application' }
 // previously cached stripped jar so new entries are always applied.
 // ----------------------------------------------------------------------------
 def jadxVersion = '1.5.0'
+// SHA-256 of https://github.com/skylot/jadx/releases/download/v1.5.0/jadx-1.5.0.zip — the build
+// refuses a download that does not match, so a tampered/MITM'd engine can never end up in the APK.
+def jadxZipSha256 = 'c5a713fa4800cbb9e6df85ced1bef95ba329040c95cb87d54465f108483e4ef9'
 def jadxLibsDir = layout.buildDirectory.dir('jadx-libs').get().asFile
 def STRIP_SCHEMA = 'v2'
 def finalJarName = "jadx-${jadxVersion}-android-${STRIP_SCHEMA}.jar"
@@ -56,9 +59,24 @@ tasks.register('fetchJadx') {
             def url = "https://github.com/skylot/jadx/releases/download/v${jadxVersion}/jadx-${jadxVersion}.zip"
             logger.lifecycle("Downloading jadx engine: ${url}")
             try {
-                new URL(url).withInputStream { ins -> zipFile.withOutputStream { outs -> outs << ins } }
+                def conn = new URL(url).openConnection()
+                conn.connectTimeout = 30_000
+                conn.readTimeout = 60_000
+                conn.inputStream.withCloseable { ins -> zipFile.withOutputStream { outs -> outs << ins } }
             } catch (Exception e) {
+                zipFile.delete()
                 throw new GradleException("Could not download jadx from ${url}. Cause: ${e.message}")
+            }
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+            zipFile.withInputStream { ins ->
+                byte[] buf = new byte[65536]
+                int n
+                while ((n = ins.read(buf)) > 0) digest.update(buf, 0, n)
+            }
+            def actual = digest.digest().collect { String.format('%02x', it) }.join()
+            if (actual != jadxZipSha256) {
+                zipFile.delete()
+                throw new GradleException("jadx download failed integrity check.\n  expected ${jadxZipSha256}\n  actual   ${actual}")
             }
             new java.util.zip.ZipFile(zipFile).withCloseable { zf ->
                 zf.entries().each { entry ->
@@ -141,8 +159,8 @@ android {
         applicationId "com.apklens.app"
         minSdk 26              // DEX invoke-polymorphic (MethodHandle.invoke) requires API 26+
         targetSdk 34
-        versionCode 2
-        versionName "1.0.1"
+        versionCode 3
+        versionName "1.1.0"
         multiDexEnabled true
     }
 

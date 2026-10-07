@@ -37,6 +37,49 @@ public class MainActivity extends android.app.Activity {
         root.setBackgroundColor(Ui.BG);
         setContentView(root);
         push(new HomeScreen(this), false);
+        handleIncoming(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIncoming(intent);
+    }
+
+    /** "Open with ApkLens" / "Share to ApkLens" from a file manager, browser or chat app. */
+    private void handleIncoming(Intent in) {
+        if (in == null) return;
+        android.net.Uri uri = null;
+        String a = in.getAction();
+        if (Intent.ACTION_VIEW.equals(a)) {
+            uri = in.getData();
+        } else if (Intent.ACTION_SEND.equals(a)) {
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                uri = in.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri.class);
+            } else {
+                @SuppressWarnings("deprecation")
+                android.net.Uri legacy = in.getParcelableExtra(Intent.EXTRA_STREAM);
+                uri = legacy;
+            }
+        }
+        if (uri == null) return;
+        // Consume it so rotating/resuming does not re-import the same file.
+        setIntent(new Intent());
+        if (EngineState.getPhase() == EngineState.Phase.RUNNING) {
+            android.widget.Toast.makeText(this, "A conversion is already running",
+                    android.widget.Toast.LENGTH_LONG).show();
+            return;
+        }
+        Screen top = stack.peek();
+        NewProjectScreen target;
+        if (top instanceof NewProjectScreen) {
+            target = (NewProjectScreen) top;
+        } else {
+            target = new NewProjectScreen(this);
+            push(target);
+        }
+        target.importUri(uri);
     }
 
     @Override
@@ -87,6 +130,16 @@ public class MainActivity extends android.app.Activity {
         a.setDuration(150);
         prev.startAnimation(a);
         prev.onShow();
+    }
+
+    /** Swaps the top screen for another one (no dead screen left on the back stack). */
+    public void replaceTop(Screen next) {
+        if (stack.size() > 1) {
+            Screen cur = stack.pop();
+            cur.onHide();
+            root.removeView(cur);
+        }
+        push(next);
     }
 
     public void popToRoot() {
